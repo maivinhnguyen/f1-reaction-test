@@ -29,3 +29,5 @@ Unlike normal click-to-start tests, this one simulates the **clutch release** us
 
 * **Static HTML** – No backend or server required.
 * **Tailwind CSS** – Styled via CDN for a clean, dark-theme UI.
+Play it directly here:
+👉 **[https://maivinhnguyen.github.io/f1-reaction-test/](https://maivinhnguyen.github.io/f1-reaction-test/)**
