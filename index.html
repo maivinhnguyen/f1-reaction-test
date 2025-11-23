@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>F1 Clutch Reaction Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto Mono', monospace;
+            background-color: #111111;
+            color: #ffffff;
+            user-select: none;
+            -webkit-user-select: none;
+            overflow: hidden; /* Prevent scrolling during touch interactions */
+        }
+
+        .light {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background-color: #2a2a2a;
+            border: 4px solid #1a1a1a;
+            transition: background-color 0.05s, box-shadow 0.05s;
+        }
+
+        /* Mobile adjustments for lights */
+        @media (max-width: 640px) {
+            .light {
+                width: 40px;
+                height: 40px;
+                border-width: 3px;
+            }
+        }
+
+        .light.active {
+            background-color: #ff0000;
+            box-shadow: 0 0 20px 5px rgba(255, 0, 0, 0.6), inset 0 0 10px rgba(255, 255, 255, 0.5);
+            border-color: #550000;
+        }
+
+        .gantry-bg {
+            background: linear-gradient(to bottom, #222, #111);
+            border: 1px solid #333;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        /* Clutch Visuals */
+        .clutch-indicator {
+            transition: all 0.1s ease;
+        }
+        .clutch-active {
+            transform: scale(0.95);
+            opacity: 0.8;
+            border-color: #ef4444 !important; /* Red border */
+            color: #ef4444 !important;
+        }
+
+        /* Timer Font */
+        .timer-display {
+            font-family: 'Orbitron', sans-serif;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Prevent context menu on right click */
+        body {
+            -webkit-touch-callout: none;
+        }
+    </style>
+</head>
+<body class="h-screen w-full flex flex-col items-center justify-between py-8 relative cursor-pointer">
+
+    <!-- Background Grid Effect -->
+    <div class="absolute inset-0 z-0 opacity-5 pointer-events-none" 
+         style="background-image: radial-gradient(#444 1px, transparent 1px); background-size: 20px 20px;">
+    </div>
+
+    <!-- Top Section: Gantry -->
+    <div class="z-10 w-full max-w-3xl flex flex-col items-center space-y-8 mt-4">
+        <div class="flex flex-col items-center">
+            <h1 class="text-xl text-gray-500 uppercase tracking-[0.3em] mb-4 font-bold">Formula 1 Reaction Test</h1>
+            
+            <!-- The Gantry -->
+            <div class="gantry-bg p-4 md:p-6 rounded-2xl flex gap-3 md:gap-6 relative">
+                <!-- 5 Lights -->
+                <div class="light" id="light-1"></div>
+                <div class="light" id="light-2"></div>
+                <div class="light" id="light-3"></div>
+                <div class="light" id="light-4"></div>
+                <div class="light" id="light-5"></div>
+                
+                <!-- Gantry Structure Decor (Lines) -->
+                <div class="absolute -top-4 left-10 right-10 h-4 border-l-2 border-r-2 border-t-2 border-gray-800 rounded-t-xl -z-10"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Middle Section: Status & Timer -->
+    <div class="z-10 flex flex-col items-center justify-center flex-grow space-y-6 text-center">
+        
+        <div id="status-text" class="text-2xl md:text-3xl font-bold text-gray-400 tracking-widest transition-colors duration-200">
+            HOLD TO ENGAGE CLUTCH
+        </div>
+
+        <div id="main-timer" class="timer-display text-6xl md:text-8xl font-black text-white opacity-50 transition-all duration-100">
+            0.000
+        </div>
+
+        <div id="feedback" class="h-8 text-red-500 font-bold text-lg"></div>
+
+    </div>
+
+    <!-- Bottom Section: Instructions & Stats -->
+    <div class="z-10 w-full max-w-md px-6 pb-6">
+        
+        <!-- Clutch Visual Indicator -->
+        <div id="clutch-btn" class="clutch-indicator w-full border-2 border-gray-600 rounded-xl p-4 text-center mb-8 text-gray-500 font-bold select-none">
+            <span class="text-sm md:text-base uppercase tracking-widest">Clutch Paddle Zone</span>
+            <div class="text-xs text-gray-600 mt-1">Click & Hold anywhere / Touch & Hold</div>
+        </div>
+
+        <!-- History -->
+        <div class="border-t border-gray-800 pt-4">
+            <div class="flex justify-between text-gray-500 text-xs uppercase tracking-wider mb-2">
+                <span>Recent Times</span>
+                <span>Avg: <span id="avg-time" class="text-white">---</span></span>
+            </div>
+            <div id="history-list" class="space-y-1 text-sm font-mono text-gray-400 h-32 overflow-hidden relative">
+                <!-- JS will populate this -->
+                <div class="text-gray-700 text-center italic mt-4">No data yet</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State Management ---
+        const STATE = {
+            IDLE: 'IDLE',         // Waiting for user to hold
+            STAGING: 'STAGING',   // Lights turning on 1 by 1
+            READY: 'READY',       // All 5 lights on, waiting for random delay
+            LIVE: 'LIVE',         // Lights out, timer running
+            FINISHED: 'FINISHED', // User released, showing result
+            JUMP: 'JUMP'          // False start
+        };
+
+        let currentState = STATE.IDLE;
+        let lightInterval = null;
+        let randomTimeout = null;
+        let startTime = 0;
+        let lightsOnCount = 0;
+        let reactionTimes = [];
+
+        // --- DOM Elements ---
+        const lights = [
+            document.getElementById('light-1'),
+            document.getElementById('light-2'),
+            document.getElementById('light-3'),
+            document.getElementById('light-4'),
+            document.getElementById('light-5')
+        ];
+        const statusText = document.getElementById('status-text');
+        const mainTimer = document.getElementById('main-timer');
+        const feedback = document.getElementById('feedback');
+        const clutchBtn = document.getElementById('clutch-btn');
+        const historyList = document.getElementById('history-list');
+        const avgDisplay = document.getElementById('avg-time');
+        const body = document.body;
+
+        // --- Audio Context (Optional subtle beeps, can be added later) ---
+        // Keeping it visual only for simplicity and "One File" reliability.
+
+        // --- Interaction Handlers ---
+
+        function handleInputStart(e) {
+            if (e.type === 'touchstart') e.preventDefault(); // Prevent scrolling/zoom
+            if (e.button !== 0 && e.type === 'mousedown') return; // Only left click
+
+            clutchBtn.classList.add('clutch-active');
+
+            if (currentState === STATE.IDLE || currentState === STATE.FINISHED || currentState === STATE.JUMP) {
+                resetTest();
+                startSequence();
+            }
+        }
+
+        function handleInputEnd(e) {
+            if (e.type === 'touchend') e.preventDefault();
+            
+            clutchBtn.classList.remove('clutch-active');
+
+            if (currentState === STATE.STAGING || currentState === STATE.READY) {
+                triggerJumpStart();
+            } else if (currentState === STATE.LIVE) {
+                finishTest();
+            }
+        }
+
+        // --- Core Logic ---
+
+        function resetTest() {
+            // Clear existing timers
+            clearTimeout(lightInterval);
+            clearTimeout(randomTimeout);
+            
+            // Reset Visuals
+            lights.forEach(l => l.classList.remove('active'));
+            mainTimer.textContent = "0.000";
+            mainTimer.classList.remove('text-green-500', 'text-red-500', 'opacity-100');
+            mainTimer.classList.add('opacity-50', 'text-white');
+            feedback.textContent = "";
+            statusText.textContent = "CLUTCH ENGAGED";
+            statusText.className = "text-2xl md:text-3xl font-bold text-yellow-500 tracking-widest";
+            
+            lightsOnCount = 0;
+        }
+
+        function startSequence() {
+            currentState = STATE.STAGING;
+            
+            // Light up one light every 1 second (standard F1 timing is approx 1s interval)
+            let currentLight = 0;
+            
+            // Immediate first light? No, usually a small delay after engagement
+            setTimeout(() => {
+                // Check if still holding
+                if(currentState !== STATE.STAGING) return;
+
+                lightInterval = setInterval(() => {
+                    if (currentLight < 5) {
+                        lights[currentLight].classList.add('active');
+                        currentLight++;
+                        lightsOnCount = currentLight;
+                    } else {
+                        // All lights are on
+                        clearInterval(lightInterval);
+                        currentState = STATE.READY;
+                        
+                        // Random delay between 0.2s and 3s (F1 regulation style variance)
+                        const delay = Math.random() * 3000 + 200; 
+                        
+                        randomTimeout = setTimeout(goLightsOut, delay);
+                    }
+                }, 1000);
+            }, 500);
+        }
+
+        function goLightsOut() {
+            if (currentState !== STATE.READY) return;
+
+            // LIGHTS OUT
+            lights.forEach(l => l.classList.remove('active'));
+            startTime = performance.now();
+            currentState = STATE.LIVE;
+            
+            statusText.textContent = "GO!";
+            statusText.className = "text-4xl md:text-6xl font-black text-green-500 tracking-widest scale-110 transform transition-transform";
+            mainTimer.classList.remove('opacity-50');
+            mainTimer.classList.add('opacity-100');
+        }
+
+        function triggerJumpStart() {
+            currentState = STATE.JUMP;
+            clearInterval(lightInterval);
+            clearTimeout(randomTimeout);
+            
+            statusText.textContent = "JUMP START";
+            statusText.className = "text-3xl font-bold text-red-600 animate-pulse";
+            feedback.textContent = "Released too early!";
+            
+            // Flash lights red to indicate penalty
+            lights.forEach(l => l.classList.add('active'));
+        }
+
+        function finishTest() {
+            const endTime = performance.now();
+            const rawTime = endTime - startTime;
+            const formattedTime = (rawTime / 1000).toFixed(3);
+            
+            currentState = STATE.FINISHED;
+            mainTimer.textContent = formattedTime;
+            
+            // Analyze result
+            if (rawTime < 100) {
+                // Humanly impossible / anticipation
+                statusText.textContent = "FALSE START"; // Too fast to be reaction
+                mainTimer.classList.add('text-red-500');
+                feedback.textContent = "Reaction < 0.100s (Anticipated)";
+            } else {
+                statusText.textContent = "FINISH";
+                mainTimer.classList.remove('text-white');
+                mainTimer.classList.add('text-green-400');
+                
+                // Evaluate
+                let comment = "";
+                if (rawTime < 200) comment = "F1 DRIVER LEVEL! 🏆";
+                else if (rawTime < 250) comment = "Very Fast 🏎️";
+                else if (rawTime < 300) comment = "Good Start";
+                else if (rawTime < 400) comment = "Average";
+                else comment = "Bogged Down 🐢";
+                
+                feedback.textContent = comment;
+                saveScore(formattedTime);
+            }
+        }
+
+        function saveScore(time) {
+            reactionTimes.unshift(parseFloat(time));
+            if (reactionTimes.length > 20) reactionTimes.pop(); // Keep last 20
+            
+            updateHistoryUI();
+        }
+
+        function updateHistoryUI() {
+            // Update List
+            historyList.innerHTML = reactionTimes.slice(0, 5).map((t, i) => `
+                <div class="flex justify-between border-b border-gray-800 py-1">
+                    <span class="text-gray-500">#${i+1}</span>
+                    <span class="${t < 0.25 ? 'text-green-400' : 'text-white'}">${t.toFixed(3)}s</span>
+                </div>
+            `).join('');
+
+            // Update Avg
+            const validTimes = reactionTimes.filter(t => t >= 0.1); // Filter false starts from avg
+            if (validTimes.length > 0) {
+                const avg = validTimes.reduce((a, b) => a + b, 0) / validTimes.length;
+                avgDisplay.textContent = avg.toFixed(3) + "s";
+            }
+        }
+
+        // --- Event Listeners (Global) ---
+        // We bind to window/body so the user can hold anywhere
+        window.addEventListener('mousedown', handleInputStart);
+        window.addEventListener('mouseup', handleInputEnd);
+        
+        window.addEventListener('touchstart', handleInputStart, {passive: false});
+        window.addEventListener('touchend', handleInputEnd, {passive: false});
+
+        // Prevent Context Menu
+        window.addEventListener('contextmenu', event => event.preventDefault());
+
+        // Keyboard support (Spacebar)
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && !e.repeat) handleInputStart({ type: 'mousedown', button: 0 });
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') handleInputEnd({ type: 'mouseup' });
+        });
+
+    </script>
+</body>
+</html>
